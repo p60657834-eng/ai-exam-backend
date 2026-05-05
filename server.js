@@ -1,109 +1,57 @@
+require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 
 const app = express();
+app.use(cors());
 app.use(express.json());
-app.use(cors({
-  origin: "*"
-}));
-const PORT = 3000;
 
-// 🧠 SIMPLE MEMORY DATABASE
+// TEMP DATABASE (for now)
 let users = {};
-let payments = {};
 
-// 🟢 HOME
+// TEST
 app.get("/", (req, res) => {
-  res.send("Backend working 🚀");
+  res.send("Backend is LIVE 🚀");
 });
-// 🤖 AI (DEMO)
+
+// LOGIN
+app.post("/login", (req, res) => {
+  const { email, password } = req.body;
+
+  if (!users[email]) {
+    users[email] = { email, password, premium: false };
+  }
+
+  res.json({ message: "Login successful", user: users[email] });
+});
+
+// AI (simple for now)
 app.post("/ask", (req, res) => {
-  const { userId, question } = req.body;
+  const { question } = req.body;
 
-  if (!userId) return res.json({ error: "No userId" });
-
-  if (!users[userId]) {
-    users[userId] = {
-      premium: false,
-      free: 3
-    };
+  if (!question) {
+    return res.json({ answer: "Ask something!" });
   }
 
-  if (!users[userId].premium && users[userId].free <= 0) {
-    return res.json({ answer: "Upgrade to premium 💰" });
-  }
-
-  if (!users[userId].premium) {
-    users[userId].free--;
-  }
-
+  // simple fake AI (works without API key)
   res.json({
-    answer: "AI Answer: " + question
+    answer: "AI says: " + question + " (demo response)"
   });
 });
 
-// 💰 CREATE PAYMENT
-app.post("/create-payment", (req, res) => {
+// PAYMENT
+app.post("/payment-success", (req, res) => {
   const { userId } = req.body;
 
-  const paymentId = "PAY" + Date.now();
-
-  payments[paymentId] = {
-    userId,
-    status: "pending"
-  };
-
-  res.json({
-    upi: "9989066730-3@ybl",
-    paymentId
-  });
-});
-
-// 📤 SUBMIT PAYMENT
-app.post("/submit-payment", (req, res) => {
-  const { paymentId, utr } = req.body;
-
-  if (!payments[paymentId]) {
-    return res.json({ error: "Invalid payment" });
+  if (!users[userId]) {
+    return res.json({ error: "User not found" });
   }
 
-  payments[paymentId].utr = utr;
-  payments[paymentId].status = "submitted";
+  users[userId].premium = true;
 
-  res.json({ message: "Payment submitted" });
-});
-
-// ✅ APPROVE PAYMENT
-app.post("/approve-payment", (req, res) => {
-  const { paymentId } = req.body;
-
-  const payment = payments[paymentId];
-
-  if (!payment) {
-    return res.json({ error: "Not found" });
-  }
-
-  users[payment.userId].premium = true;
-  payment.status = "approved";
-
-  res.json({ message: "User upgraded 🚀" });
-});
-
-// 📊 ANALYTICS
-app.get("/analytics", (req, res) => {
-  const totalUsers = Object.keys(users).length;
-  const premiumUsers = Object.values(users).filter(u => u.premium).length;
-
-  const revenue =
-    Object.values(payments).filter(p => p.status === "approved").length * 49;
-
-  res.json({
-    totalUsers,
-    premiumUsers,
-    revenue
-  });
+  res.json({ message: "User upgraded to PRO 🚀" });
 });
 
 app.listen(3000, () => {
-  console.log("Server running on port 3000");
+  console.log("✅ Server running on port 3000");
 });
