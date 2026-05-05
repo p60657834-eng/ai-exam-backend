@@ -134,7 +134,82 @@ app.post("/payment-success", async (req, res) => {
     res.status(500).json({ error: "Payment verification failed" });
   }
 });
+// 📌 GENERATE PAYMENT REQUEST
+app.post("/create-upi", async (req, res) => {
+  try {
+    const { userId } = req.body;
 
+    const paymentId = "PAY" + Date.now();
+
+    await db.collection("payments").doc(paymentId).set({
+      userId,
+      status: "pending",
+      createdAt: new Date()
+    });
+
+    res.json({
+      upi: "9989066730-3@ybl",
+      paymentId
+    });
+
+  } catch (err) {
+    res.status(500).json({ error: "Error creating payment" });
+  }
+});
+
+
+// 📌 SUBMIT PAYMENT (USER SIDE)
+app.post("/submit-payment", async (req, res) => {
+  try {
+    const { paymentId, utr } = req.body;
+
+    if (!paymentId || !utr) {
+      return res.status(400).json({ error: "Missing data" });
+    }
+
+    await db.collection("payments").doc(paymentId).update({
+      utr,
+      status: "submitted",
+      submittedAt: new Date()
+    });
+
+    res.json({ message: "Payment submitted for verification" });
+
+  } catch (err) {
+    res.status(500).json({ error: "Submission failed" });
+  }
+});
+
+
+// 🔐 ADMIN APPROVE (ONLY YOU SHOULD CALL THIS)
+app.post("/approve-payment", async (req, res) => {
+  try {
+    const { paymentId } = req.body;
+
+    const payment = await db.collection("payments").doc(paymentId).get();
+
+    if (!payment.exists) {
+      return res.status(404).json({ error: "Not found" });
+    }
+
+    const data = payment.data();
+
+    // mark premium
+    await db.collection("users").doc(data.userId).set({
+      premium: true,
+      paidAt: new Date()
+    }, { merge: true });
+
+    await db.collection("payments").doc(paymentId).update({
+      status: "approved"
+    });
+
+    res.json({ message: "User upgraded" });
+
+  } catch (err) {
+    res.status(500).json({ error: "Approval failed" });
+  }
+});
 app.listen(PORT, () => {
   console.log(`🔥 Server running on port ${PORT}`);
 });
