@@ -1,215 +1,109 @@
 const express = require("express");
 const cors = require("cors");
-const fetch = require("node-fetch");
-const admin = require("firebase-admin");
 
 const app = express();
-app.use(cors());
 app.use(express.json());
+app.use(cors({
+  origin: "*"
+}));
+const PORT = 3000;
 
-const PORT = process.env.PORT || 3000;
+// 🧠 SIMPLE MEMORY DATABASE
+let users = {};
+let payments = {};
 
-// 🔐 OpenAI API Key (SAFE)
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-
-// 🔥 Firebase Admin Setup
-const serviceAccount = JSON.parse(process.env.FIREBASE_KEY);
-
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount)
-});
-
-const db = admin.firestore();
-
-// ✅ TEST ROUTE
+// 🟢 HOME
 app.get("/", (req, res) => {
-  res.send("🚀 SaaS Backend Running");
+  res.send("Backend working 🚀");
 });
+// 🤖 AI (DEMO)
+app.post("/ask", (req, res) => {
+  const { userId, question } = req.body;
 
+  if (!userId) return res.json({ error: "No userId" });
 
-// 🔥 AI ENDPOINT (WITH PREMIUM CHECK)
-app.post("/ask", async (req, res) => {
-  try {
-    const { question, userId } = req.body;
-
-    if (!question || !userId) {
-      return res.status(400).json({ error: "Missing data" });
-    }
-
-    // 🔐 Check user premium
-    const userDoc = await db.collection("users").doc(userId).get();
-
-    if (!userDoc.exists || !userDoc.data().premium) {
-      return res.json({ answer: "❌ Buy premium to use AI" });
-    }
-
-    // 🤖 Call OpenAI
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${OPENAI_API_KEY}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        model: "gpt-4o-mini",
-        messages: [
-          { role: "system", content: "You are a helpful AI tutor." },
-          { role: "user", content: question }
-        ]
-      })
-    });
-
-    const data = await response.json();
-
-    res.json({
-      answer: data.choices?.[0]?.message?.content || "No response"
-    });
-
-  } catch (err) {
-    console.log(err);
-    res.status(500).json({ error: "Server error" });
+  if (!users[userId]) {
+    users[userId] = {
+      premium: false,
+      free: 3
+    };
   }
-});
 
-
-// 💰 PAYMENT SUBMIT API
-app.post("/payment", async (req, res) => {
-  try {
-    const { userId, txnId } = req.body;
-
-    if (!userId || !txnId) {
-      return res.status(400).json({ error: "Missing data" });
-    }
-
-    await db.collection("payments").add({
-      userId,
-      txnId,
-      status: "pending",
-      time: new Date()
-    });
-
-    res.json({ message: "Payment submitted" });
-
-  } catch (err) {
-    console.log(err);
-    res.status(500).json({ error: "Error saving payment" });
+  if (!users[userId].premium && users[userId].free <= 0) {
+    return res.json({ answer: "Upgrade to premium 💰" });
   }
-});
 
-
-// 🔓 ADMIN APPROVE PAYMENT
-app.post("/approve", async (req, res) => {
-  try {
-    const { userId } = req.body;
-
-    await db.collection("users").doc(userId).set({
-      premium: true
-    }, { merge: true });
-
-    res.json({ message: "User upgraded to premium" });
-
-  } catch (err) {
-    res.status(500).json({ error: "Approval failed" });
+  if (!users[userId].premium) {
+    users[userId].free--;
   }
+
+  res.json({
+    answer: "AI Answer: " + question
+  });
 });
-// PAYMENT SUCCESS (SIMULATED / READY FOR RAZORPAY)
-app.post("/payment-success", async (req, res) => {
-  try {
-    const { userId, amount } = req.body;
 
-    if (!userId) {
-      return res.status(400).json({ error: "Missing user" });
-    }
+// 💰 CREATE PAYMENT
+app.post("/create-payment", (req, res) => {
+  const { userId } = req.body;
 
-    // upgrade user
-    await db.collection("users").doc(userId).set({
-      premium: true,
-      plan: "pro",
-      paidAt: new Date()
-    }, { merge: true });
+  const paymentId = "PAY" + Date.now();
 
-    res.json({ message: "Payment verified & user upgraded" });
+  payments[paymentId] = {
+    userId,
+    status: "pending"
+  };
 
-  } catch (err) {
-    res.status(500).json({ error: "Payment verification failed" });
+  res.json({
+    upi: "9989066730-3@ybl",
+    paymentId
+  });
+});
+
+// 📤 SUBMIT PAYMENT
+app.post("/submit-payment", (req, res) => {
+  const { paymentId, utr } = req.body;
+
+  if (!payments[paymentId]) {
+    return res.json({ error: "Invalid payment" });
   }
+
+  payments[paymentId].utr = utr;
+  payments[paymentId].status = "submitted";
+
+  res.json({ message: "Payment submitted" });
 });
-// 📌 GENERATE PAYMENT REQUEST
-app.post("/create-upi", async (req, res) => {
-  try {
-    const { userId } = req.body;
 
-    const paymentId = "PAY" + Date.now();
+// ✅ APPROVE PAYMENT
+app.post("/approve-payment", (req, res) => {
+  const { paymentId } = req.body;
 
-    await db.collection("payments").doc(paymentId).set({
-      userId,
-      status: "pending",
-      createdAt: new Date()
-    });
+  const payment = payments[paymentId];
 
-    res.json({
-      upi: "9989066730-3@ybl",
-      paymentId
-    });
-
-  } catch (err) {
-    res.status(500).json({ error: "Error creating payment" });
+  if (!payment) {
+    return res.json({ error: "Not found" });
   }
+
+  users[payment.userId].premium = true;
+  payment.status = "approved";
+
+  res.json({ message: "User upgraded 🚀" });
 });
 
+// 📊 ANALYTICS
+app.get("/analytics", (req, res) => {
+  const totalUsers = Object.keys(users).length;
+  const premiumUsers = Object.values(users).filter(u => u.premium).length;
 
-// 📌 SUBMIT PAYMENT (USER SIDE)
-app.post("/submit-payment", async (req, res) => {
-  try {
-    const { paymentId, utr } = req.body;
+  const revenue =
+    Object.values(payments).filter(p => p.status === "approved").length * 49;
 
-    if (!paymentId || !utr) {
-      return res.status(400).json({ error: "Missing data" });
-    }
-
-    await db.collection("payments").doc(paymentId).update({
-      utr,
-      status: "submitted",
-      submittedAt: new Date()
-    });
-
-    res.json({ message: "Payment submitted for verification" });
-
-  } catch (err) {
-    res.status(500).json({ error: "Submission failed" });
-  }
+  res.json({
+    totalUsers,
+    premiumUsers,
+    revenue
+  });
 });
 
-
-// 🔐 ADMIN APPROVE (ONLY YOU SHOULD CALL THIS)
-app.post("/approve-payment", async (req, res) => {
-  try {
-    const { paymentId } = req.body;
-
-    const payment = await db.collection("payments").doc(paymentId).get();
-
-    if (!payment.exists) {
-      return res.status(404).json({ error: "Not found" });
-    }
-
-    const data = payment.data();
-
-    // mark premium
-    await db.collection("users").doc(data.userId).set({
-      premium: true,
-      paidAt: new Date()
-    }, { merge: true });
-
-    await db.collection("payments").doc(paymentId).update({
-      status: "approved"
-    });
-
-    res.json({ message: "User upgraded" });
-
-  } catch (err) {
-    res.status(500).json({ error: "Approval failed" });
-  }
-});
-app.listen(PORT, () => {
-  console.log(`🔥 Server running on port ${PORT}`);
+app.listen(3000, () => {
+  console.log("Server running on port 3000");
 });
